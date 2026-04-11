@@ -1,0 +1,30 @@
+# ===== Python =====
+__pycache__/
+*.pyc
+*.pyo
+
+# ===== 환경 =====
+.env
+venv/
+.venv/
+
+# ===== IDE =====
+.vscode/
+.idea/
+
+# ===== Jupyter =====
+.ipynb_checkpoints/
+
+# ===== 실험 결과 / 출력 =====
+images/
+submission/
+vis_outputs/
+experiments/
+
+# ===== 모델 파일 =====
+*.pth
+*.pt
+*.ckpt
+
+# ===== 기타 =====
+.DS_Store
