@@ -3,6 +3,7 @@ import matplotlib.patches as patches
 import torch
 
 
+
 def tensor_to_image(image: torch.Tensor):
     image = image.detach().cpu().permute(1, 2, 0).numpy()
     return image

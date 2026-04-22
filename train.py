@@ -27,22 +27,19 @@ EXPERIMENTS_ROOT.mkdir(exist_ok=True)
 
 EXPERIMENT_CONFIGS = [
     {
-        "name": "exp02_AdamW_lr0005_neg15",
-        "optimizer": "AdamW",
-        "lr": 0.005,
+        "name": "fstrRC_SGD_lr005_neg15",
+        "optimizer": "SGD",
+        "lr": 0.001,
         "momentum": 0.9,
         "weight_decay": 0.0005,
         "neg_ratio": 1.5,
         "batch_size": 4,
-        "num_epochs": 3,
+        "num_epochs": 7,
         "step_size": 3,
         "gamma": 0.1,
         "seed": 42,
     },    
 ]
-# 처음엔 3개만 추천
-# 너무 많이 넣으면 밤새 돌려도 오래 걸릴 수 있음
-
 
 def evaluate_loss(model, dataloader, device):
     model.train()

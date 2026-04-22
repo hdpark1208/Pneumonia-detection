@@ -1,4 +1,4 @@
-print('a')
+import random
 
-# %%
-print('1')
+for i in random.Random(42):
+    print(i)

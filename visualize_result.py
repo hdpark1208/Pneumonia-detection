@@ -10,6 +10,7 @@ import torch
 from dataset import PneumoniaDataset
 from model import get_model
 from utils import make_patient_records, train_valid_split, seed_everything
+from torchvision.ops import nms
 
 
 BASE_DIR = Path(r"C:\Users\PHD\.cache\kagglehub\datasets\iamtapendu\rsna-pneumonia-processed-dataset\versions\1")
@@ -17,7 +18,7 @@ TRAIN_META = BASE_DIR / "stage2_train_metadata.csv"
 TRAIN_IMAGE_DIR = BASE_DIR / "Training" / "Images"
 
 # 여기만 네 상황에 맞게 바꿔
-MODEL_PATH = Path("experiments/exp01_sgd_lr0005_neg15/checkpoints/best_model.pth")
+MODEL_PATH = Path("experiments/fstrRC_SGD_lr005_neg15/best_model.pth")
 # 예: experiments/exp01_sgd_lr0005_neg15/best_model.pth
 
 OUTPUT_DIR = Path("vis_outputs")
@@ -28,30 +29,78 @@ def tensor_to_image(image: torch.Tensor):
     image = image.detach().cpu().permute(1, 2, 0).numpy()
     return image
 
+# new prediction for NMS
+def filter_prediction(
+    prediction,
+    score_threshold=0.25,
+    top_k=5,
+    min_area=0,
+    nms_threshold=0.3,
+):
+    boxes = prediction["boxes"].detach().cpu()
+    scores = prediction["scores"].detach().cpu()
 
-def filter_prediction(prediction, score_threshold=0.25, top_k=5, min_area=0):
-    boxes = prediction["boxes"].detach().cpu().numpy()
-    scores = prediction["scores"].detach().cpu().numpy()
+    # 1) score threshold
+    keep = scores >= score_threshold
+    boxes = boxes[keep]
+    scores = scores[keep]
 
-    pairs = []
-    for box, score in zip(boxes, scores):
-        if float(score) < score_threshold:
-            continue
+    if len(boxes) == 0:
+        return [], []
 
+    # 2) min_area filtering
+    keep_indices = []
+    for i, box in enumerate(boxes):
         x1, y1, x2, y2 = box.tolist()
         area = max(0.0, x2 - x1) * max(0.0, y2 - y1)
-        if area < min_area:
-            continue
+        if area >= min_area:
+            keep_indices.append(i)
 
-        pairs.append((float(score), [x1, y1, x2, y2]))
+    if len(keep_indices) == 0:
+        return [], []
 
-    pairs.sort(key=lambda x: x[0], reverse=True)
-    pairs = pairs[:top_k]
+    boxes = boxes[keep_indices]
+    scores = scores[keep_indices]
 
-    filtered_boxes = [box for score, box in pairs]
-    filtered_scores = [score for score, box in pairs]
+    # 3) additional NMS
+    keep = nms(boxes, scores, nms_threshold)
+    boxes = boxes[keep]
+    scores = scores[keep]
 
-    return filtered_boxes, filtered_scores
+    if len(boxes) == 0:
+        return [], []
+
+    # 4) top_k
+    order = torch.argsort(scores, descending=True)
+    order = order[:top_k]
+    boxes = boxes[order]
+    scores = scores[order]
+
+    return boxes.tolist(), scores.tolist()
+
+# def filter_prediction(prediction, score_threshold=0.25, top_k=5, min_area=0):
+#     boxes = prediction["boxes"].detach().cpu().numpy()
+#     scores = prediction["scores"].detach().cpu().numpy()
+
+#     pairs = []
+#     for box, score in zip(boxes, scores):
+#         if float(score) < score_threshold:
+#             continue
+
+#         x1, y1, x2, y2 = box.tolist()
+#         area = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+#         if area < min_area:
+#             continue
+
+#         pairs.append((float(score), [x1, y1, x2, y2]))
+
+#     pairs.sort(key=lambda x: x[0], reverse=True)
+#     pairs = pairs[:top_k]
+
+#     filtered_boxes = [box for score, box in pairs]
+#     filtered_scores = [score for score, box in pairs]
+
+#     return filtered_boxes, filtered_scores
 
 
 def draw_gt(ax, gt_boxes):
@@ -98,13 +147,23 @@ def save_gt_only(image, target, save_path, title="GT"):
     plt.close()
 
 
-def save_pred_only(image, prediction, save_path, score_threshold=0.25, top_k=5, min_area=0, title="Prediction"):
+def save_pred_only(
+    image,
+    prediction,
+    save_path,
+    score_threshold=0.25,
+    top_k=5,
+    min_area=0,
+    nms_threshold=0.3,
+    title="Prediction",
+):
     image_np = tensor_to_image(image)
     pred_boxes, pred_scores = filter_prediction(
         prediction,
         score_threshold=score_threshold,
         top_k=top_k,
         min_area=min_area,
+        nms_threshold=nms_threshold,
     )
 
     fig, ax = plt.subplots(figsize=(8, 8))
@@ -175,7 +234,7 @@ def main():
 
     rng = random.Random(42)
 
-    chosen_pos = rng.sample(pos_indices, k=min(3, len(pos_indices)))
+    chosen_pos = rng.sample(pos_indices, k=min(10, len(pos_indices)))
     chosen_neg = rng.sample(neg_indices, k=min(2, len(neg_indices)))
 
     chosen_indices = chosen_pos + chosen_neg
@@ -200,25 +259,37 @@ def main():
         save_pred_only(
             image,
             prediction,
-            OUTPUT_DIR / f"{patient_id}_pred.png",
+            OUTPUT_DIR / f"{patient_id}_pred_before_nms.png",
             score_threshold=0.25,
             top_k=5,
             min_area=0,
-            title=f"Prediction - {patient_id}",
+            nms_threshold=1.0,   # 사실상 NMS 거의 안 하는 수준
+            title=f"Prediction Before NMS - {patient_id}",
         )
 
-        save_gt_and_pred(
+        # NMS 적용 prediction 저장
+        save_pred_only(
             image,
-            target,
             prediction,
-            OUTPUT_DIR / f"{patient_id}_gt_pred.png",
+            OUTPUT_DIR / f"{patient_id}_pred_after_nms.png",
             score_threshold=0.25,
             top_k=5,
             min_area=0,
-            title=f"GT vs Prediction - {patient_id}",
+            nms_threshold=0.3,
+            title=f"Prediction After NMS - {patient_id}",
         )
 
-        print(f"저장 완료: {patient_id}")
+        # save_gt_and_pred(
+        #     image,
+        #     target,
+        #     prediction,
+        #     OUTPUT_DIR / f"{patient_id}_gt_pred.png",
+        #     score_threshold=0.25,
+        #     top_k=5,
+        #     min_area=0,
+        #     title=f"GT vs Prediction - {patient_id}",
+        # )
+
 
     print(f"\n모든 이미지 저장 완료: {OUTPUT_DIR.resolve()}")
 
